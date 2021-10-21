@@ -1,0 +1,286 @@
+import lingo/pegcode/driver;
+import math/math;
+import runtime;
+
+Expression ::= Int, Sum, Sub, Mul, Div, Var, Pow;
+Int : (n : int);
+Var : (s : string);
+Pow : (e : Expression, n : Int);
+Sum : (x: Expression, y: Expression);
+Sub : (x: Expression, y: Expression);
+Div : (x: Expression, y: Expression);
+Mul : (x: Expression, y: Expression);
+
+Fraction : (x : int, y : int);
+
+ForExpr : (s : string, n : Expression);
+
+Result ::= Ok, Bad;
+Ok : (n : int);
+Bad : (error : string);
+
+forToExp(x : Expression, y : ForExpr) -> Expression {
+    //println(y);
+    if (y.s == "+") {Sum(x, y.n)} else
+    if (y.s == "-") {Sub(x, y.n)} else
+    if (y.s == "*") {Mul(x, y.n)} else
+    if (y.s == "/") {Div(x, y.n)} else 
+    x;
+}
+buildExpr(x : Expression, y : [ForExpr] ) -> Expression {
+    fold(y, x, forToExp)
+}
+
+specialPegActions = {
+	t = setTree(defaultPegActions.t, "buildExpr", \xs: [flow] -> flow(buildExpr(xs[0], xs[1])));
+	SemanticActions(t);
+}
+
+printExpression(expr : Expression) -> string {
+    switch (expr : Expression) {
+        Int(a) : i2s(a);
+        Var(a) : a;
+        Pow(a, b) : "(" + printExpression(a) + "^" + printExpression(b) + ")";
+        Sum(a, b) : "(" + printExpression(a) + " + " + printExpression(b) + ")";
+        Sub(a, b) : "(" + printExpression(a) + " - " + printExpression(b) + ")";
+        Mul(a, b) : "(" + printExpression(a) + " * " + printExpression(b) + ")";
+        Div(a, b) : "(" + printExpression(a) + " / " + printExpression(b) + ")";
+    }
+}
+
+calc_only_int (expr : Expression) -> int {
+    switch (expr : Expression) {
+        Int(a) : a;
+        default: 0;
+    }
+}
+
+unpack_from_OK (res : Result) -> int {
+    switch (res : Result) {
+        Ok(var): {
+            var
+        };
+        default: 0;
+    }
+}
+
+calc_as_int (expr : Expression, vars : Tree<string, int>) -> Result {
+    switch (expr : Expression) {
+        Int(a) : Ok(a);
+        Var(a) : {
+            //either(Ok(lookupTree(vars, a)), Bad("Unable to find variable!"))
+            if (isSome(lookupTree(vars, a))) {
+                Ok(either(lookupTree(vars, a), 0))
+            } else {
+                Bad("Unable to find variable!")
+            }
+        };
+        Pow(a, b) : {
+            arg1 = calc_as_int(a, vars);
+            arg2 = calc_as_int(b, vars);
+            if (arg1.structname == "Bad") {
+                arg1
+            } else if (arg2.structname == "Bad") {
+                arg2
+            } else if (unpack_from_OK(arg2) < 0) {
+                Bad("Negative exponent value!")
+            } else {
+                Ok(pow(unpack_from_OK(arg1), unpack_from_OK(arg2)))
+            }
+        };
+        Sum(a, b) : {
+            arg1 = calc_as_int(a, vars);
+            arg2 = calc_as_int(b, vars);
+            if (arg1.structname == "Bad") {
+                arg1
+            } else if (arg2.structname == "Bad") {
+                arg2
+            } else {
+                Ok(unpack_from_OK(arg1) + unpack_from_OK(arg2))
+            }
+        };
+        Sub(a, b) : {
+            arg1 = calc_as_int(a, vars);
+            arg2 = calc_as_int(b, vars);
+            if (arg1.structname == "Bad") {
+                arg1
+            } else if (arg2.structname == "Bad") {
+                arg2
+            } else {
+                Ok(unpack_from_OK(arg1) - unpack_from_OK(arg2))
+            }
+        };
+        Mul(a, b) : {
+            arg1 = calc_as_int(a, vars);
+            arg2 = calc_as_int(b, vars);
+            if (arg1.structname == "Bad") {
+                arg1
+            } else if (arg2.structname == "Bad") {
+                arg2
+            } else {
+                Ok(unpack_from_OK(arg1) * unpack_from_OK(arg2))
+            }
+        };
+        Div(a, b) : {
+            arg1 = calc_as_int(a, vars);
+            arg2 = calc_as_int(b, vars);
+            if (arg1.structname == "Bad") {
+                arg1
+            } else if (arg2.structname == "Bad") {
+                arg2
+            } else if (unpack_from_OK(arg2) == 0) {
+                Bad("Division by zero!")
+            } else {
+                Ok(unpack_from_OK(arg1) / unpack_from_OK(arg2))
+            }
+        };
+    }
+}
+
+simplification(exp : Expression) -> Expression {
+    switch (exp : Expression) {
+        Int(a) : Int(a);
+        Var(a) : Var(a);
+        Pow(a, b) : { //Pow(a, b);
+            e = simplification(a);
+            if (e.structname == "Int") {
+                Int(pow(calc_only_int(e), calc_only_int(b)));
+            } else
+            if (b == Int(1)) {
+                e;
+            } else 
+            if (b == Int(0)) {
+                Int(1);
+            } else {
+                Pow(e, b);
+            }
+        }
+        Sum(a, b) : {
+            //if (a.structname != "Int") {simplification(a);}
+            //if (b.structname != "Int") {simplification(b);}
+            e1 = simplification(a);
+            e2 = simplification(b);
+            if (e1.structname == "Int" && e2.structname == "Int") {
+                Int(calc_only_int(e1) + calc_only_int(e2))
+            } else 
+            if (e1 == Int(0)) {
+                e2
+            } else if (e2 == Int(0)) {
+                e1
+            } else {
+                Sum(e1, e2);
+            }
+        }
+        Sub(a, b) : {
+            if (simplification(a).structname == "Int" && simplification(b).structname == "Int") {
+                Int(calc_only_int(simplification(a)) - calc_only_int(simplification(b)))
+            } else if (simplification(a) == simplification(b)) {
+                Int(0)
+            } else if (simplification(b) == Int(0)) {
+                simplification(a)
+            }
+            else {
+                Sub(simplification(a), simplification(b))
+            }
+        };
+        Mul(a, b) : {
+            if (simplification(a).structname == "Int" && simplification(b).structname == "Int") {
+                Int(calc_only_int(simplification(a)) * calc_only_int(simplification(b)))
+            } else if (simplification(a) == Int(0) || simplification(b) == Int(0)) {
+                Int(0)
+            } else if (simplification(a) == Int(1)) {
+                simplification(b)
+            } else if (simplification(b) == Int(1)) {
+                simplification(a)
+            }
+            else {
+                Mul(simplification(a), simplification(b))
+            }
+        };
+        Div(a, b) : {
+            //if (a.structname != "Int") {simplification(a);}
+            //if (b.structname != "Int") {simplification(b);}
+            if (simplification(a).structname == "Int" && simplification(b).structname == "Int") {
+                Int(calc_only_int(simplification(a)) / calc_only_int(simplification(b)))
+            } else if (simplification(a) == Int(0)) {
+                Int(0)
+            } else {
+                Div(simplification(a), simplification(b))
+            }
+        };
+    }
+}
+
+d_dx (exp : Expression, dx : Var) -> Expression {
+    switch (exp : Expression) {
+        Int(a) : Int(0);
+        Var(a) : {
+            if (Var(a) == dx) {
+                Int(1)
+            } else {
+                Int(0)
+            }
+        };
+        Pow(a, b) : {
+            Mul(Pow(a, Int(calc_only_int(b) - 1)), Mul(d_dx(a, dx), b))
+        };
+        Sum(a, b) : Sum(d_dx(a, dx), d_dx(b, dx));
+        Sub(a, b) : Sub(d_dx(a, dx), d_dx(b, dx));
+        Mul(a, b) : Sum(Mul(a, d_dx(b, dx)), Mul(d_dx(a, dx), b));
+        Div(a, b) : Div(Sub(Mul(d_dx(a, dx), b), Mul(a, d_dx(b, dx))), Pow(b, Int(2)));
+    }
+}
+
+calc_as_frac (exp : Expression, vars : Tree<string, int>) -> Fraction {
+    switch (exp : Expression) {
+        Int(a) : Fraction(a, 1);
+        Var(a) : Fraction(either(lookupTree(vars, a), 0), 1);
+        Pow(a, b) : Fraction( pow(calc_as_frac(a, vars).x, unpack_from_OK(calc_as_int(b, vars))), pow(calc_as_frac(a, vars).y, unpack_from_OK(calc_as_int(b, vars))));
+        Sum(a, b) : {
+            nok = lcm(calc_as_frac(a, vars).y, calc_as_frac(b, vars).y);
+            mul1 = nok / calc_as_frac(a, vars).y;
+            mul2 = nok / calc_as_frac(b, vars).y;
+            nod = gcd (calc_as_frac(a, vars).x * mul1 + calc_as_frac(b, vars).x * mul2, nok);
+            Fraction ( (calc_as_frac(a, vars).x * mul1 + calc_as_frac(b, vars).x * mul2) / nod, nok / nod);
+            }
+        Sub(a, b) : {
+            nok = lcm(calc_as_frac(a, vars).y, calc_as_frac(b, vars).y);
+            mul1 = nok / calc_as_frac(a, vars).y;
+            mul2 = nok / calc_as_frac(b, vars).y;
+            nod = gcd (calc_as_frac(a, vars).x * mul1 - calc_as_frac(b, vars).x * mul2, nok);
+            Fraction ( (calc_as_frac(a, vars).x * mul1 - calc_as_frac(b, vars).x * mul2) / nod, nok / nod);
+        };
+        Mul(a, b) : {
+            nod = gcd(calc_as_frac(a, vars).x * calc_as_frac(b, vars).x, calc_as_frac(a, vars).y * calc_as_frac(b, vars).y);
+            Fraction( calc_as_frac(a, vars).x * calc_as_frac(b, vars).x / nod, calc_as_frac(a, vars).y * calc_as_frac(b, vars).y / nod);
+            }
+        Div(a, b) : {
+            nod = gcd (calc_as_frac(a, vars).x * calc_as_frac(b, vars).y, calc_as_frac(a, vars).y * calc_as_frac(b, vars).x);
+            Fraction( calc_as_frac(a, vars).x * calc_as_frac(b, vars).y / nod, calc_as_frac(a, vars).y * calc_as_frac(b, vars).x / nod);
+            }
+    }
+}
+
+
+main() {
+    result = parsic(compilePegGrammar("#include expression.lingo"), "(x - (y + x)) - 3 / 0", specialPegActions);
+    println(result);
+    vars = makeTree1("x", 1);
+    uff = setTree(vars, "y", 2);
+    println(uff);
+    //println(lookupTree(uff, "x"));
+    println(calc_as_int(result, uff));
+    println(printExpression(result));
+
+    res2 = parsic(compilePegGrammar("#include expression.lingo"), "(3^2) / 2 - 1 / 6", specialPegActions);
+    println(calc_as_frac(res2, uff));
+    res3 = parsic(compilePegGrammar("#include expression.lingo"), "1 + 2*3 - x*1", specialPegActions);
+    println(calc_as_frac(res3, uff));
+    println(simplification(res3));
+    for_dif = parsic(compilePegGrammar("#include expression.lingo"), "(2*x+1)^5", specialPegActions);
+    for_dif2 = parsic(compilePegGrammar("#include expression.lingo"), "x*x", specialPegActions);
+    println(printExpression(simplification(d_dx(for_dif, Var("x")))));
+    println(printExpression(simplification(d_dx(for_dif2, Var("x")))));
+
+    quit(0);
+}

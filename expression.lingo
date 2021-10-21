@@ -1,0 +1,13 @@
+exp = term:t1 experm*:arr {buildExpr(:t1, :arr)};
+experm = ws ('+' | '-')$s ws term:t {ForExpr($s, :t)};
+term = form:f1 forerm*:arr {buildExpr(:f1, :arr)};
+forerm = ws ('*' | '/')$s ws form:f {ForExpr($s, :f)};
+form = pow_form | not_pow_form;
+pow_form = not_pow_form:f ws '^' ws num:n {Pow(:f, :n)};
+not_pow_form = var:n1 {:n1} | '(' ws exp:e ws ')' {:e};
+var = word | num;
+word = letter+$s {Var($s)};
+letter = 'a'-'z' | 'A' - 'Z';
+num = digit+$d {Int(s2i($d))};
+digit = '0'-'9';
+ws = " "*;
